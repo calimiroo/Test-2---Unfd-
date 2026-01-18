@@ -1,289 +1,464 @@
+# Merged Streamlit app using Option-1 (TOOL1) and Option-2 (TOOL2) extractors
+# Filename: Option-1-2_Merged_Streamlit_App_Headless.py
+# Usage: pip install -r requirements.txt
+# Run: streamlit run Option-1-2_Merged_Streamlit_App_Headless.py
+
 import streamlit as st
 import pandas as pd
-import asyncio
-import nest_asyncio
-import os
 import time
-import logging
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+import random
+import os
+import sys
+import tempfile
+import re
+from datetime import datetime, timedelta
 
-nest_asyncio.apply()
+# Selenium / undetected_chromedriver
+import undetected_chromedriver as uc
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
-# Set asyncio policy for Windows
-if os.name == 'nt':
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+# --------------------------- UTILS ---------------------------
 
-# --- إعداد الصفحة ---
-st.set_page_config(page_title="ICP Unified Search", layout="wide")
-st.title("HAMADA ICP UNIFIED SEARCH TEST")
-
-# --- إدارة جلسة العمل (Session State) ---
-if 'authenticated' not in st.session_state:
-    st.session_state['authenticated'] = False
-if 'run_state' not in st.session_state:
-    st.session_state['run_state'] = 'stopped'
-if 'batch_results' not in st.session_state:
-    st.session_state['batch_results'] = []
-if 'browser_page' not in st.session_state:
-    st.session_state['browser_page'] = None
-if 'browser' not in st.session_state:
-    st.session_state['browser'] = None
-
-# قائمة الجنسيات
-countries_list = ["Select Nationality", "Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Antigua and Barbuda", "Argentina", "Armenia", "Australia", "Austria", "Azerbaijan", "Bahamas", "Bahrain", "Bangladesh", "Barbados", "Belarus", "Belgium", "Belize", "Benin", "Bhutan", "Bolivia", "Bosnia and Herzegovina", "Botswana", "Brazil", "Brunei", "Bulgaria", "Burkina Faso", "Burundi", "Cabo Verde", "Cambodia", "Cameroon", "Canada", "Central African Republic", "Chad", "Chile", "China", "Colombia", "Comoros", "Congo (Congo-Brazzaville)", "Costa Rica", "Côte d'Ivoire", "Croatia", "Cuba", "Cyprus", "Czechia (Czech Republic)", "Democratic Republic of the Congo", "Denmark", "Djibouti", "Dominica", "Dominican Republic", "Ecuador", "Egypt", "El Salvador", "Equatorial Guinea", "Eritrea", "Estonia", "Eswatini", "Ethiopia", "Fiji", "Finland", "France", "Gabon", "Gambia", "Georgia", "Germany", "Ghana", "Greece", "Grenada", "Guatemala", "Guinea", "Guinea-Bissau", "Guyana", "Haiti", "Holy See", "Honduras", "Hungary", "Iceland", "India", "Indonesia", "Iran", "Iraq", "Ireland", "Israel", "Italy", "Jamaica", "Japan", "Jordan", "Kazakhstan", "Kenya", "Kiribati", "Kuwait", "Kyrgyzstan", "Laos", "Latvia", "Lebanon", "Lesotho", "Liberia", "Libya", "Liechtenstein", "Lithuania", "Luxembourg", "Madagascar", "Malawi", "Malaysia", "Maldives", "Mali", "Malta", "Marshall Islands", "Mauritania", "Mauritius", "Mexico", "Micronesia", "Moldova", "Monaco", "Mongolia", "Montenegro", "Morocco", "Mozambique", "Myanmar", "Namibia", "Nauru", "Nepal", "Netherlands", "New Zealand", "Nicaragua", "Niger", "Nigeria", "North Korea", "North Macedonia", "Norway", "Oman", "Pakistan", "Palau", "Palestine State", "Panama", "Papua New Guinea", "Paraguay", "Peru", "Philippines", "Poland", "Portugal", "Qatar", "Romania", "Russia", "Rwanda", "Saint Kitts and Nevis", "Saint Lucia", "Saint Vincent and the Grenadines", "Samoa", "San Marino", "Sao Tome and Principe", "Saudi Arabia", "Senegal", "Serbia", "Seychelles", "Sierra Leone", "Singapore", "Slovakia", "Slovenia", "Solomon Islands", "Somalia", "South Africa", "South Korea", "South Sudan", "Spain", "Sri Lanka", "Sudan", "Suriname", "Sweden", "Switzerland", "Syria", "Tajikistan", "Tanzania", "Thailand", "Timor-Leste", "Togo", "Tonga", "Trinidad and Tobago", "Tunisia", "Turkey", "Turkmenistan", "Tuvalu", "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom", "United States of America", "Uruguay", "Uzbekistan", "Vanuatu", "Venezuela", "Vietnam", "Yemen", "Zambia", "Zimbabwe"]
-
-# --- تسجيل الدخول ---
-if not st.session_state['authenticated']:
-    with st.form("login_form"):
-        st.subheader("Protected Access")
-        pwd_input = st.text_input("Enter Password", type="password")
-        if st.form_submit_button("Login"):
-            if pwd_input == "Bilkish":
-                st.session_state['authenticated'] = True
-                st.rerun()
-            else: st.error("Incorrect Password.")
-    st.stop()
-
-# --- إعدادات أساسية ---
-TARGET_URL = "https://smartservices.icp.gov.ae/echannels/web/client/guest/index.html#/leavePermit/588/step1?administrativeRegionId=1&withException=false"
-LOGIN_URL_PART = "client/default.html#/login"
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger(__name__)
-
-async def setup_browser():
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)  # غيره إلى False لو عايز تشوف الـ browser local للـ debug
-        context = await browser.new_context(
-            viewport={'width': 1366, 'height': 768},
-            locale='en-US',  # فرض اللغة الإنجليزية عشان الـ labels تكون "Passport Type"
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        page = await context.new_page()
-
-        async def handle_route(route):
-            if LOGIN_URL_PART in route.request.url:
-                logger.warning(f"Prevented redirect to login: {route.request.url}")
-                await route.abort()
-            else:
-                await route.continue_()
-
-        await page.route("**/*", handle_route)
-        await page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=90000)
-        await page.wait_for_load_state('networkidle', timeout=60000)  # انتظار تحميل كامل
-        await asyncio.sleep(5)
-
-        # انتظار حقل Passport Number عشان نتأكد إن الـ form loaded
-        try:
-            await page.wait_for_selector("input#passportNo", timeout=60000)
-            logger.info("Form loaded successfully (passportNo field found)")
-        except:
-            logger.error("Passport Number field not found - page may not have loaded correctly")
-
-        # إغلاق popup إذا موجود
-        try:
-            await page.click("button:has-text('I Got It')", timeout=10000)
-        except:
-            pass
-
-        # اختيار نوع الطلب (radio button)
-        await page.evaluate("""
-            const el = document.querySelector("input[value='4']");
-            if (el) {
-                el.click();
-                el.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        """)
-        await asyncio.sleep(2)
-
-        # محاولة اختيار Passport Type مع try/except و timeout أكبر + selector محسن
-        try:
-            # selector محسن يدعم إنجليزي أو عربي
-            passport_type_container = page.locator(
-                "//label[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'passport type') or contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'نوع جواز')]/following::div[contains(@class,'ui-select-container')][1]"
-            )
-            await passport_type_container.wait_for(state="visible", timeout=60000)
-            await passport_type_container.click(force=True, timeout=60000)
-            await asyncio.sleep(1)
-
-            # كتابة ORDINARY PASSPORT (أو عادي لو عربي)
-            await page.keyboard.type("ORDINARY PASSPORT", delay=100)
-            await asyncio.sleep(2)  # انتظار الـ suggestions
-            await page.keyboard.press("Enter")
-            await asyncio.sleep(1)
-            await page.keyboard.press("Escape")
-            logger.info("Passport Type set successfully")
-        except Exception as e:
-            logger.warning(f"Failed to set Passport Type (may be optional or default): {str(e)}")
-            # نستمر بدون ما نفشل الـ setup كامل
-
-        return page, browser
-
-async def process_row(page, passport_no, nationality, previous_passport, previous_unified):
-    # الكود زي ما هو (مع await لكل حاجة)
+def beep():
     try:
-        passport_input = page.locator("input#passportNo")
-        await passport_input.fill("")
-        await asyncio.sleep(0.5)
+        import winsound
+        winsound.Beep(1000, 300)
+    except Exception:
+        print("\a")
 
+def get_chrome_version():
+    try:
+        if sys.platform == 'win32':
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\BLBeacon")
+            version, _ = winreg.QueryValueEx(key, "version")
+            return int(version.split('.')[0])
+    except Exception:
+        pass
+    return None
+
+class RobustChrome(uc.Chrome):
+    def __del__(self):
         try:
-            clear_btn = page.locator('div[name="currentNationality"] button[ng-if="showClear"]')
-            if await clear_btn.is_visible(timeout=2000):
-                await clear_btn.click(force=True)
-                await asyncio.sleep(0.5)
+            self.quit()
+        except Exception:
+            pass
+
+def get_shadow_element(driver, selector):
+    script = f"""
+    function findInShadows(selector) {{
+        function search(root) {{
+            if (!root) return null;
+            const found = root.querySelector(selector);
+            if (found) return found;
+            const all = root.querySelectorAll('*');
+            for (const el of all) {{
+                if (el.shadowRoot) {{
+                    const result = search(el.shadowRoot);
+                    if (result) return result;
+                }}
+            }}
+            return null;
+        }}
+        return search(document);
+    }}
+    return findInShadows('{selector}');
+    """
+    try:
+        return driver.execute_script(script)
+    except Exception:
+        return None
+
+# --------------------------- EXTRACTORS ---------------------------
+
+def extract_mohre_single(eid, headless=True, lang_force=True, wait_extra=0):
+    options = uc.ChromeOptions()
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--window-size=1920,1080')
+    options.add_argument('--lang=en-US')
+    options.add_experimental_option('prefs', {'intl.accept_languages': 'en-US,en'})
+
+    version = get_chrome_version()
+    if not version and sys.platform != 'win32':
+        version = 128
+
+    driver = None
+    try:
+        driver = RobustChrome(options=options, version_main=version)
+        driver.get("https://backoffice.mohre.gov.ae/mohre.complaints.app/freezoneAnonymous2/ComplaintVerification?lang=en")
+        time.sleep(random.uniform(3, 6) + wait_extra)
+
+        # try to click English
+        try:
+            lang_btn = None
+            try:
+                lang_btn = driver.find_element(By.XPATH, "//a[contains(text(), 'English')]")
+            except:
+                try:
+                    lang_btn = driver.find_element(By.XPATH, "//span[contains(text(), 'English')]")
+                except:
+                    pass
+            if lang_btn and lang_btn.is_displayed():
+                driver.execute_script("arguments[0].click();", lang_btn)
+                time.sleep(1)
         except:
             pass
 
-        await passport_input.fill(passport_no)
-        await asyncio.sleep(1.0)
-        await page.keyboard.press("Tab")
-        await asyncio.sleep(0.5)
+        # select employee if necessary
+        try:
+            emp_btn = driver.find_element(By.ID, "employeeLink")
+            driver.execute_script("arguments[0].click();", emp_btn)
+            time.sleep(1)
+        except:
+            pass
 
-        unified_number = "Not Found"
-        async with page.expect_response("**/checkValidateLeavePermitRequest**", timeout=30000) as response_info:
-            await page.keyboard.type(nationality, delay=100)
-            await asyncio.sleep(2.0)
-            await page.keyboard.press("Enter")
-            await asyncio.sleep(1.0)
-            await page.keyboard.press("Escape")
+        # fill EID
+        eid_input = get_shadow_element(driver, '#IdentityNumber')
+        if not eid_input:
+            try:
+                eid_input = driver.find_element(By.ID, "EIDA")
+            except:
+                eid_input = None
 
-            response = await response_info.value
-            if response.status == 200:
-                json_data = await response.json()
-                if json_data.get("message") == "Invalid data" or json_data.get("unifiedNumber") == "Invalid data":
-                    return "Invalid Data"
-                raw_unified = json_data.get("unifiedNumber")
-                if raw_unified is not None:
-                    unified_str = str(raw_unified).strip()
-                    if unified_str and unified_str not in ["Invalid data", "null", "None", ""]:
-                        if previous_unified is not None and unified_str == previous_unified:
-                            if passport_no == previous_passport:
-                                unified_number = unified_str
-                            else:
-                                unified_number = "Not Found"
-                        else:
-                            unified_number = unified_str
+        if not eid_input:
+            return {"EID": eid, "FullName": "Input Not Found", "MobileNumber": "Input Not Found"}
 
-        return unified_number
-    except PlaywrightTimeoutError:
-        return "Not Found"
-    except Exception as e:
-        logger.error(f"Error processing {passport_no}: {str(e)}")
-        return "ERROR"
+        driver.execute_script("arguments[0].value = '';", eid_input)
+        driver.execute_script(f"arguments[0].value = '{eid}';", eid_input)
+        time.sleep(0.5)
 
-def color_status(val):
-    color = '#90EE90' if val == 'Found' else '#FFCCCB'
-    return f'background-color: {color}'
+        search_btn = get_shadow_element(driver, '#btnSearchEIDA')
+        if not search_btn:
+            try:
+                search_btn = driver.find_element(By.ID, "workderUid")
+            except:
+                search_btn = None
 
-# --- واجهة المستخدم ---
-tab1, tab2 = st.tabs(["Single Search", "Upload Excel File"])
+        if not search_btn:
+            return {"EID": eid, "FullName": "Search Button Not Found", "MobileNumber": "Search Button Not Found"}
 
-with tab1:
-    st.subheader("Single Person Search")
-    c1, c2 = st.columns(2)
-    p_in = c1.text_input("Passport Number", key="s_p")
-    n_in = c2.selectbox("Nationality", countries_list, key="s_n")
+        driver.execute_script("arguments[0].click();", search_btn)
+        time.sleep(random.uniform(6, 10) + wait_extra)
 
-    if st.button("Search Now"):
-        if p_in and n_in != "Select Nationality":
-            with st.spinner("Searching..."):
+        full_name_el = get_shadow_element(driver, '#FullName')
+        if not full_name_el:
+            try:
+                full_name_el = driver.find_element(By.ID, "CallerName")
+            except:
+                full_name_el = None
+
+        name = 'Not Found'
+        try:
+            if full_name_el:
+                name = driver.execute_script("return arguments[0] ? (arguments[0].value || arguments[0].innerText) : 'Not Found';", full_name_el)
+        except:
+            name = 'Not Found'
+
+        if lang_force and re.search(r'[\u0600-\u06FF]', name or ''):
+            try:
+                driver.execute_script("window.location.href = window.location.href.split('?')[0] + '?lang=en';")
+                time.sleep(2)
+                full_name_el = get_shadow_element(driver, '#FullName')
+                if full_name_el:
+                    name = driver.execute_script("return arguments[0] ? (arguments[0].value || arguments[0].innerText) : 'Not Found';", full_name_el)
+            except:
+                pass
+
+        mobile = 'Not Found'
+        try:
+            unmasked_el = get_shadow_element(driver, '#employeeMobile')
+            if not unmasked_el:
                 try:
-                    if st.session_state['browser_page'] is None:
-                        page, browser = asyncio.run(setup_browser())
-                        st.session_state['browser_page'] = page
-                        st.session_state['browser'] = browser
-                    page = st.session_state['browser_page']
-                    unified = asyncio.run(process_row(page, p_in, n_in.upper(), None, None))
-                    status = "Found" if unified not in ["Not Found", "ERROR", "Invalid Data"] else "Not Found"
-                    res = {"Passport Number": p_in, "Nationality": n_in, "Unified Number": unified, "Status": status}
-                    df_res = pd.DataFrame([res])
-                    styled_df = df_res.style.applymap(color_status, subset=['Status'])
-                    st.dataframe(styled_df)
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
+                    unmasked_el = driver.find_element(By.ID, "employeeMobile")
+                except:
+                    unmasked_el = None
+            if unmasked_el:
+                mobile = driver.execute_script("return arguments[0].value || arguments[0].innerText || 'Not Found';", unmasked_el)
+            else:
+                visible_mobile_el = get_shadow_element(driver, '#MobileNumber')
+                if visible_mobile_el:
+                    mobile = driver.execute_script("return arguments[0].getAttribute('title') || arguments[0].value || arguments[0].innerText || 'Not Found';", visible_mobile_el)
+        except:
+            mobile = 'Not Found'
 
-with tab2:
-    st.subheader("Batch Processing Control")
-    uploaded_file = st.file_uploader("Upload Excel", type=["xlsx"])
+        return {"EID": eid, "FullName": name or 'Not Found', "MobileNumber": mobile or 'Not Found', "Source": "TOOL1"}
 
-    if uploaded_file:
-        df = pd.read_excel(uploaded_file)
-        st.write(f"Total records: {len(df)}")
-        st.dataframe(df, height=200)
+    except Exception as e:
+        return {"EID": eid, "FullName": "Error", "MobileNumber": str(e), "Source": "TOOL1"}
+    finally:
+        try:
+            if driver:
+                driver.quit()
+        except:
+            pass
 
-        col_ctrl1, col_ctrl2, col_ctrl3 = st.columns(3)
-        if col_ctrl1.button("▶️ Start / Resume"):
-            st.session_state.run_state = 'running'
-        if col_ctrl2.button("⏸️ Pause"):
-            st.session_state.run_state = 'paused'
-        if col_ctrl3.button("⏹️ Stop & Reset"):
-            st.session_state.run_state = 'stopped'
-            st.session_state.batch_results = []
-            if st.session_state.get('browser'):
-                asyncio.run(st.session_state['browser'].close())
-                st.session_state['browser_page'] = None
-                st.session_state['browser'] = None
-            st.rerun()
 
-        if st.session_state.run_state in ['running', 'paused']:
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            stats_area = st.empty()
-            live_table_area = st.empty()
+def extract_dcd_single(eid, headless=True, wait_extra=0):
+    options = uc.ChromeOptions()
+    options.add_argument('--headless=new')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--window-size=1920,1080')
+    options.add_argument('--disable-gpu')
+    temp_dir = tempfile.mkdtemp()
+    options.add_argument(f'--user-data-dir={temp_dir}')
+    options.add_argument('--lang=en-US')
+    options.add_experimental_option('prefs', {'intl.accept_languages': 'en-US,en'})
+
+    version = get_chrome_version()
+    if not version:
+        version = None
+
+    driver = None
+    try:
+        driver = RobustChrome(options=options, version_main=version)
+        driver.get("https://dcdigitalservices.dubaichamber.com/?lang=en")
+        WebDriverWait(driver, 20).until(EC.url_contains("authenticationendpoint"))
+        time.sleep(random.uniform(2, 4) + wait_extra)
+
+        try:
+            sign_up_xpath = '//a[contains(text(), "Sign Up") or contains(text(), "Register") or contains(text(), "Create Account") or contains(text(), "Don\'t have an account") or contains(@id, "signUp")] | //button[contains(text(), "Sign Up") or contains(text(), "Register") or contains(text(), "Create Account") or contains(text(), "Don\'t have an account") or contains(@id, "signUp")]'
+            sign_up_link = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, sign_up_xpath)))
+            driver.execute_script("arguments[0].click();", sign_up_link)
+            time.sleep(random.uniform(3, 6) + wait_extra)
+        except Exception as e:
+            return {"EID": eid, "FullName": "Sign Up Not Found", "MobileNumber": "Sign Up Not Found", "Source": "TOOL2"}
+
+        try:
+            continue_btn_xpath = '//button[contains(text(), "Continue with email") or contains(text(), "Continue with Email") or contains(text(), "email/emiratesId") or contains(text(), "Email/Emirates ID") or contains(text(), "Basic") or contains(@id, "basicAuthenticator")]' 
+            continue_btn = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.XPATH, continue_btn_xpath)))
+            driver.execute_script("arguments[0].click();", continue_btn)
+            time.sleep(random.uniform(3, 6) + wait_extra)
+        except Exception:
+            pass
+
+        try:
+            uae_resident_select = WebDriverWait(driver, 8).until(EC.presence_of_element_located((By.ID, "uaeResident")))
+            driver.execute_script("arguments[0].value = 'yes';", uae_resident_select)
+            driver.execute_script("arguments[0].dispatchEvent(new Event('change'));", uae_resident_select)
+            time.sleep(1)
+        except:
+            pass
+
+        try:
+            eid_input = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "emiratesId")))
+            driver.execute_script("arguments[0].value = '';", eid_input)
+            driver.execute_script(f"arguments[0].value = '{eid}';", eid_input)
+            time.sleep(0.5)
+            driver.execute_script("arguments[0].blur();", eid_input)
+            eid_input.send_keys(Keys.TAB)
+            time.sleep(random.uniform(4, 8) + wait_extra)
+
+            def is_first_name_present(drv):
+                try:
+                    el = drv.find_element(By.ID, "firstNameUserInput")
+                    value = el.get_attribute("value")
+                    return bool(value and value != '')
+                except:
+                    return False
 
             try:
-                if st.session_state['browser_page'] is None:
-                    page, browser = asyncio.run(setup_browser())
-                    st.session_state['browser_page'] = page
-                    st.session_state['browser'] = browser
+                WebDriverWait(driver, 30).until(is_first_name_present)
+            except:
+                return {"EID": eid, "FullName": "Timeout/Not Found", "MobileNumber": "Timeout/Not Found", "Source": "TOOL2"}
 
-                page = st.session_state['browser_page']
+            def get_value_by_id(id_str):
+                try:
+                    el = driver.find_element(By.ID, id_str)
+                    value = el.get_attribute("value") or el.text or 'Not Found'
+                    return value
+                except:
+                    return 'Not Found'
 
-                start_time = time.time()
-                actual_success = 0
-                previous_passport = None
-                previous_unified = None
+            first_name = get_value_by_id("firstNameUserInput")
+            last_name = get_value_by_id("lastNameUserInput")
+            full_name = f"{first_name} {last_name}".strip() if first_name != 'Not Found' else 'Not Found'
+            email = get_value_by_id("usernameUserInput")
+            mobile = get_value_by_id("mobileNumber")
 
-                for i, row in df.iterrows():
-                    while st.session_state.run_state == 'paused':
-                        status_text.warning("Paused... click Resume to continue.")
-                        time.sleep(1)
+            return {
+                "EID": eid,
+                "FullName": full_name or 'Not Found',
+                "MobileNumber": mobile or 'Not Found',
+                "Email": email or 'Not Found',
+                "Source": "TOOL2"
+            }
+        except Exception as e:
+            return {"EID": eid, "FullName": "Error", "MobileNumber": str(e), "Source": "TOOL2"}
 
-                    if st.session_state.run_state == 'stopped':
-                        break
+    except Exception as e:
+        return {"EID": eid, "FullName": "Critical Error", "MobileNumber": str(e), "Source": "TOOL2"}
+    finally:
+        try:
+            if driver:
+                driver.quit()
+        except:
+            pass
 
-                    if i < len(st.session_state.batch_results):
-                        if st.session_state.batch_results[i].get("Status") == "Found":
-                            actual_success += 1
-                        continue
+# --------------------------- STREAMLIT APP ---------------------------
 
-                    p_num = str(row.get('Passport Number', '')).strip()
-                    nat = str(row.get('Nationality', '')).strip().upper()
+st.set_page_config(page_title="HAMADA TRACING - Unified", layout="wide")
+st.title("HAMADA TRACING")
 
-                    status_text.info(f"Processing {i+1}/{len(df)}: {p_num}")
-                    unified = asyncio.run(process_row(page, p_num, nat, previous_passport, previous_unified))
+# --- auth ---
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
 
-                    status = "Found" if unified not in ["Not Found", "ERROR", "Invalid Data"] else "Not Found"
-                    res = {"Passport Number": p_num, "Nationality": nat, "Unified Number": unified, "Status": status}
+if not st.session_state.authenticated:
+    with st.form('login'):
+        st.subheader('Protected Access')
+        pwd = st.text_input('Password', type='password')
+        if st.form_submit_button('Login'):
+            if pwd == 'Hamada':
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error('Wrong password')
+    st.stop()
 
-                    if status == "Found":
-                        actual_success += 1
-                        previous_unified = unified
-                        previous_passport = p_num
+# --- app controls ---
+col_top = st.columns([2,1])
+with col_top[0]:
+    # TOOL1 افتراضيًا
+    extractor_mode = st.selectbox(
+        'Extractor Mode',
+        ['Both (TOOL1 + TOOL2)', 'TOOL1 only', 'TOOL2 only'],
+        index=1  # هنا index=1 يجعل TOOL1 only هو الافتراضي
+    )
+with col_top[1]:
+    wait_multiplier = st.slider('Delay multiplier (speed vs reliability)', 0.0, 5.0, 0.5, 0.1)
+# helper to run chosen extractors
+def run_extractors_on_eid(eid):
+    results = []
+    if extractor_mode in ['Both (TOOL1 + TOOL2)', 'TOOL1 only']:
+        res1 = extract_mohre_single(eid, headless=True, wait_extra=wait_multiplier)
+        if res1:
+            results.append(res1)
+    if extractor_mode in ['Both (TOOL1 + TOOL2)', 'TOOL2 only']:
+        res2 = extract_dcd_single(eid, headless=True, wait_extra=wait_multiplier)
+        if res2:
+            results.append(res2)
+    return results
 
-                    st.session_state.batch_results.append(res)
+# ---------- SINGLE SEARCH ----------
+tab1, tab2 = st.tabs(['Single EID Search', 'Batch (Upload Excel)'])
 
-                    elapsed = round(time.time() - start_time, 1)
-                    progress_bar.progress((i + 1) / len(df))
-                    stats_area.markdown(f"✅ **Actual Success (Found):** {actual_success} | ⏱️ **Timer:** {elapsed}s")
+with tab1:
+    st.subheader('Single Emirates ID lookup')
+    c1, c2 = st.columns([3,1])
+    eid_input = c1.text_input('Enter Emirates ID (only digits)')
+    if c2.button('Search'):
+        if not eid_input or not str(eid_input).strip():
+            st.warning('Enter a valid Emirates ID')
+        else:
+            with st.spinner('Running extractors...'):
+                start = time.time()
+                aggregated = run_extractors_on_eid(str(eid_input).strip())
+                if not aggregated:
+                    st.error('No results found or both extractors failed.')
+                else:
+                    df = pd.DataFrame(aggregated)
+                    st.write('Live results:')
+                    st.dataframe(df)
+                    st.download_button('Download results (CSV)', df.to_csv(index=False).encode('utf-8'), file_name=f'result_{eid_input}.csv')
+                    beep()
+                    st.success(f'Finished in {int(time.time()-start)}s')
 
-                    current_df = pd.DataFrame(st.session_state.batch_results)
-                    styled_df = current_df.style.applymap(color_status, subset=['Status'])
-                    live_table_area.dataframe(styled_df, use_container_width=True)
-                    time.sleep(2)
+# ---------- BATCH PROCESSING ----------
+with tab2:
+    st.subheader('Batch Excel upload - one column with header "EID" or "Emirates Id"')
+    uploaded = st.file_uploader('Upload .xlsx or .csv file', type=['xlsx', 'csv'])
 
-                if st.session_state.run_state == 'running':
-                    st.success("Batch Completed!")
-                    final_df = pd.DataFrame(st.session_state.batch_results)
-                    st.download_button("Download Full Report (CSV)", final_df.to_csv(index=False).encode('utf-8'), "full_results.csv")
+    if uploaded:
+        try:
+            if uploaded.name.lower().endswith('.csv'):
+                df_in = pd.read_csv(uploaded, dtype=str)
+            else:
+                df_in = pd.read_excel(uploaded, dtype=str)
+        except Exception as e:
+            st.error(f'Error reading file: {e}')
+            st.stop()
+
+        # find column
+        possible_cols = [c for c in df_in.columns if c.lower() in ['eid', 'emirates id', 'emiratesid', 'id']]
+        if not possible_cols:
+            st.warning("Couldn't find an EID column automatically. Please map the column below.")
+            col_map = st.selectbox('Map EID column', options=['--select--'] + list(df_in.columns.tolist()))
+            if col_map and col_map != '--select--':
+                eid_series = df_in[col_map].astype(str).str.strip()
+            else:
+                st.stop()
+        else:
+            eid_series = df_in[possible_cols[0]].astype(str).str.strip()
+
+        # dedupe and cleanup
+        eids = eid_series.dropna().unique().tolist()
+        st.write(f'Total unique EIDs: {len(eids)}')
+
+        if 'batch_results' not in st.session_state:
+            st.session_state.batch_results = []
+        if 'run_state' not in st.session_state:
+            st.session_state.run_state = 'stopped'
+        if 'start_time_ref' not in st.session_state:
+            st.session_state.start_time_ref = None
+
+        col_a, col_b, col_c = st.columns(3)
+        if col_a.button('▶️ Start / Resume'):
+            st.session_state.run_state = 'running'
+            if st.session_state.start_time_ref is None:
+                st.session_state.start_time_ref = time.time()
+        if col_b.button('⏸️ Pause'):
+            st.session_state.run_state = 'paused'
+        if col_c.button('⏹️ Stop & Reset'):
+            st.session_state.run_state = 'stopped'
+            st.session_state.batch_results = []
+            st.session_state.start_time_ref = None
+            st.experimental_rerun()
+
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        live_table = st.empty()
+
+        total = len(eids)
+        successes = 0
+        for idx, eid in enumerate(eids):
+            while st.session_state.run_state == 'paused':
+                status_text.warning('Paused...')
+                time.sleep(1)
+            if st.session_state.run_state == 'stopped':
+                break
+            if idx < len(st.session_state.batch_results):
+                progress_bar.progress((idx + 1) / total)
+                status_text.info(f"Skipping {idx+1}/{total} - already processed")
+                continue
+
+            status_text.info(f'Processing {idx+1}/{total}: {eid}')
+            start = time.time()
+            try:
+                res_list = run_extractors_on_eid(eid)
+                if res_list:
+                    for r in res_list:
+                        st.session_state.batch_results.append(r)
+                        if r.get('FullName') and r.get('FullName') not in ['Not Found', 'Error', 'Timeout/Not Found', 'Input Not Found']:
+                            successes += 1
+                else:
+                    st.session_state.batch_results.append({"EID": eid, "FullName": 'Not Found', 'MobileNumber': 'Not Found', 'Source': 'None'})
             except Exception as e:
-                st.error(f"Batch Error: {str(e)}")
+                st.session_state.batch_results.append({"EID": eid, "FullName": 'Error', 'MobileNumber': str(e), 'Source': 'Exception'})
+
+            elapsed = int(time.time() - start)
+            progress_bar.progress((idx + 1) / total)
+            live_df = pd.DataFrame(st.session_state.batch_results)
+            live_table.dataframe(live_df, use_container_width=True)
+            time.sleep(0.2)
+
+        if st.session_state.run_state == 'running' and len(st.session_state.batch_results) >= total:
+            st.success(f'Batch finished. Found: {successes} / {total}. Total time: {str(timedelta(seconds=int(time.time()-st.session_state.start_time_ref)))}')
+            result_df = pd.DataFrame(st.session_state.batch_results)
+            st.download_button('Download full results (CSV)', result_df.to_csv(index=False).encode('utf-8'), file_name='batch_results.csv')
+            beep()

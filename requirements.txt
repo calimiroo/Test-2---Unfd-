@@ -1,4 +1,6 @@
 streamlit
 pandas
-playwright
-nest_asyncio
+selenium
+undetected-chromedriver
+openpyxl
+st-aggrid

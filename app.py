@@ -445,3 +445,24 @@ with tab2:
                 if res_list:
                     for r in res_list:
                         st.session
+                        if res_list:
+    for r in res_list:
+        st.session_state.batch_results.append(r)
+        if r.get('FullName') and r.get('FullName') not in ['Not Found', 'Error', 'Timeout/Not Found', 'Input Not Found']:
+            successes += 1
+else:
+    st.session_state.batch_results.append({"EID": eid, "FullName": 'Not Found', 'MobileNumber': 'Not Found', 'Source': 'None'})
+
+elapsed = int(time.time() - start)
+progress_bar.progress((idx + 1) / total)
+live_df = pd.DataFrame(st.session_state.batch_results)
+live_table.dataframe(live_df, use_container_width=True)
+time.sleep(0.2)
+
+if st.session_state.run_state == 'running' and len(st.session_state.batch_results) >= total:
+    st.success(f'Batch finished. Found: {successes} / {total}. Total time: {str(timedelta(seconds=int(time.time()-st.session_state.start_time_ref)))}')
+    result_df = pd.DataFrame(st.session_state.batch_results)
+    st.download_button('Download full results (CSV)', result_df.to_csv(index=False).encode('utf-8'), file_name='batch_results.csv')
+    beep()
+
+

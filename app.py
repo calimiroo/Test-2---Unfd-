@@ -83,10 +83,7 @@ def extract_mohre_single(eid, headless=True, lang_force=True, wait_extra=0):
     options.add_argument('--lang=en-US')
     options.add_experimental_option('prefs', {'intl.accept_languages': 'en-US,en'})
 
-    # ----------- التعديل المطلوب فقط -----------
-    version = get_chrome_version()  # ترك uc يحدد ChromeDriver المناسب تلقائيًا
-    # لا تعطي أي قيمة افتراضية مثل 128
-    # ------------------------------------------
+    version = get_chrome_version()  # uc سيتولى اختيار ChromeDriver المتوافق تلقائيًا
 
     driver = None
     try:
@@ -197,7 +194,6 @@ def extract_mohre_single(eid, headless=True, lang_force=True, wait_extra=0):
                 driver.quit()
         except:
             pass
-
 
 def extract_dcd_single(eid, headless=True, wait_extra=0):
     options = uc.ChromeOptions()
@@ -333,6 +329,7 @@ with col_top[0]:
     )
 with col_top[1]:
     wait_multiplier = st.slider('Delay multiplier (speed vs reliability)', 0.0, 5.0, 0.5, 0.1)
+
 # helper to run chosen extractors
 def run_extractors_on_eid(eid):
     results = []
@@ -444,25 +441,32 @@ with tab2:
                 res_list = run_extractors_on_eid(eid)
                 if res_list:
                     for r in res_list:
-                        st.session
-                        if res_list:
-    for r in res_list:
-        st.session_state.batch_results.append(r)
-        if r.get('FullName') and r.get('FullName') not in ['Not Found', 'Error', 'Timeout/Not Found', 'Input Not Found']:
-            successes += 1
-else:
-    st.session_state.batch_results.append({"EID": eid, "FullName": 'Not Found', 'MobileNumber': 'Not Found', 'Source': 'None'})
+                        st.session_state.batch_results.append(r)
+                        if r.get('FullName') and r.get('FullName') not in ['Not Found', 'Error', 'Timeout/Not Found', 'Input Not Found']:
+                            successes += 1
+                else:
+                    st.session_state.batch_results.append({
+                        "EID": eid,
+                        "FullName": 'Not Found',
+                        'MobileNumber': 'Not Found',
+                        'Source': 'None'
+                    })
+            except Exception as e:
+                st.session_state.batch_results.append({
+                    "EID": eid,
+                    "FullName": 'Error',
+                    'MobileNumber': str(e),
+                    'Source': 'Exception'
+                })
 
-elapsed = int(time.time() - start)
-progress_bar.progress((idx + 1) / total)
-live_df = pd.DataFrame(st.session_state.batch_results)
-live_table.dataframe(live_df, use_container_width=True)
-time.sleep(0.2)
+            elapsed = int(time.time() - start)
+            progress_bar.progress((idx + 1) / total)
+            live_df = pd.DataFrame(st.session_state.batch_results)
+            live_table.dataframe(live_df, use_container_width=True)
+            time.sleep(0.2)
 
-if st.session_state.run_state == 'running' and len(st.session_state.batch_results) >= total:
-    st.success(f'Batch finished. Found: {successes} / {total}. Total time: {str(timedelta(seconds=int(time.time()-st.session_state.start_time_ref)))}')
-    result_df = pd.DataFrame(st.session_state.batch_results)
-    st.download_button('Download full results (CSV)', result_df.to_csv(index=False).encode('utf-8'), file_name='batch_results.csv')
-    beep()
-
-
+        if st.session_state.run_state == 'running' and len(st.session_state.batch_results) >= total:
+            st.success(f'Batch finished. Found: {successes} / {total}. Total time: {str(timedelta(seconds=int(time.time()-st.session_state.start_time_ref)))}')
+            result_df = pd.DataFrame(st.session_state.batch_results)
+            st.download_button('Download full results (CSV)', result_df.to_csv(index=False).encode('utf-8'), file_name='batch_results.csv')
+            beep()

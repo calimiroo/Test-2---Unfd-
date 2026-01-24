@@ -369,7 +369,7 @@ with tab1:
 
 # ---------- BATCH PROCESSING ----------
 with tab2:
-    st.subheader('Batch Excel upload - one column with header "EID" or "Emirates Id"')
+    st.subheader('Batch Excel upload')
     uploaded = st.file_uploader('Upload .xlsx or .csv file', type=['xlsx', 'csv'])
 
     if uploaded:
@@ -470,3 +470,4 @@ with tab2:
             result_df = pd.DataFrame(st.session_state.batch_results)
             st.download_button('Download full results (CSV)', result_df.to_csv(index=False).encode('utf-8'), file_name='batch_results.csv')
             beep()
+
